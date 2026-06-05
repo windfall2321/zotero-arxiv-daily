@@ -156,127 +156,127 @@ class ArxivRetriever(BaseRetriever):
 
     #     return raw_papers
     def _retrieve_raw_papers(self) -> list[ArxivResult]:
-    client = arxiv.Client(
-        num_retries=20,
-        delay_seconds=15,
-    )
-
-    query = '+'.join(self.config.source.arxiv.category)
-
-    include_cross_list = self.config.source.arxiv.get(
-        "include_cross_list",
-        False,
-    )
-
-    feed = feedparser.parse(
-        f"https://rss.arxiv.org/atom/{query}"
-    )
-
-    if 'Feed error for query' in feed.feed.title:
-        raise Exception(f"Invalid ARXIV_QUERY: {query}.")
-
-    allowed_announce_types = (
-        {"new", "cross"}
-        if include_cross_list
-        else {"new"}
-    )
-
-    all_paper_ids = [
-        i.id.removeprefix("oai:arXiv.org:")
-        for i in feed.entries
-        if i.get("arxiv_announce_type", "new")
-        in allowed_announce_types
-    ]
-
-    logger.info(
-        f"RSS returned {len(all_paper_ids)} candidate papers"
-    )
-
-    # 调试模式
-    if self.config.executor.debug:
-        all_paper_ids = all_paper_ids[:10]
-
-    # 可选：限制每天最大处理数量
-    MAX_DAILY_PAPERS = 200
-
-    if len(all_paper_ids) > MAX_DAILY_PAPERS:
-        logger.warning(
-            f"Too many papers ({len(all_paper_ids)}), "
-            f"truncating to {MAX_DAILY_PAPERS}"
+        client = arxiv.Client(
+            num_retries=20,
+            delay_seconds=15,
         )
-        all_paper_ids = all_paper_ids[:MAX_DAILY_PAPERS]
-
-    raw_papers = []
-
-    batch_size = 10
-    max_batch_retries = 6
-
-    bar = tqdm(total=len(all_paper_ids))
-
-    for batch_idx, start in enumerate(
-        range(0, len(all_paper_ids), batch_size)
-    ):
-        paper_ids = all_paper_ids[start:start + batch_size]
-
-        search = arxiv.Search(
-            id_list=paper_ids
+    
+        query = '+'.join(self.config.source.arxiv.category)
+    
+        include_cross_list = self.config.source.arxiv.get(
+            "include_cross_list",
+            False,
         )
-
-        success = False
-
-        for attempt in range(max_batch_retries):
-            try:
-                batch = list(client.results(search))
-
-                raw_papers.extend(batch)
-
-                bar.update(len(batch))
-
-                success = True
-
-                break
-
-            except arxiv.HTTPError as exc:
-                if exc.status == 429:
-                    backoff = min(
-                        600,
-                        30 * (2 ** attempt)
-                    )
-
-                    jitter = random.randint(0, 15)
-
-                    wait = backoff + jitter
-
-                    logger.warning(
-                        f"arXiv API 429 on batch "
-                        f"{batch_idx} "
-                        f"(attempt {attempt + 1}/{max_batch_retries}), "
-                        f"retry in {wait}s"
-                    )
-
-                    sleep(wait)
-
-                else:
-                    raise
-
-        if not success:
-            logger.error(
-                f"Skipping batch {batch_idx} after "
-                f"{max_batch_retries} retries"
+    
+        feed = feedparser.parse(
+            f"https://rss.arxiv.org/atom/{query}"
+        )
+    
+        if 'Feed error for query' in feed.feed.title:
+            raise Exception(f"Invalid ARXIV_QUERY: {query}.")
+    
+        allowed_announce_types = (
+            {"new", "cross"}
+            if include_cross_list
+            else {"new"}
+        )
+    
+        all_paper_ids = [
+            i.id.removeprefix("oai:arXiv.org:")
+            for i in feed.entries
+            if i.get("arxiv_announce_type", "new")
+            in allowed_announce_types
+        ]
+    
+        logger.info(
+            f"RSS returned {len(all_paper_ids)} candidate papers"
+        )
+    
+        # 调试模式
+        if self.config.executor.debug:
+            all_paper_ids = all_paper_ids[:10]
+    
+        # 可选：限制每天最大处理数量
+        MAX_DAILY_PAPERS = 200
+    
+        if len(all_paper_ids) > MAX_DAILY_PAPERS:
+            logger.warning(
+                f"Too many papers ({len(all_paper_ids)}), "
+                f"truncating to {MAX_DAILY_PAPERS}"
             )
-
-        # batch间限速
-        if start + batch_size < len(all_paper_ids):
-            sleep(15)
-
-    bar.close()
-
-    logger.info(
-        f"Successfully retrieved "
-        f"{len(raw_papers)} papers"
-    )
-
-    return raw_papers
+            all_paper_ids = all_paper_ids[:MAX_DAILY_PAPERS]
+    
+        raw_papers = []
+    
+        batch_size = 10
+        max_batch_retries = 6
+    
+        bar = tqdm(total=len(all_paper_ids))
+    
+        for batch_idx, start in enumerate(
+            range(0, len(all_paper_ids), batch_size)
+        ):
+            paper_ids = all_paper_ids[start:start + batch_size]
+    
+            search = arxiv.Search(
+                id_list=paper_ids
+            )
+    
+            success = False
+    
+            for attempt in range(max_batch_retries):
+                try:
+                    batch = list(client.results(search))
+    
+                    raw_papers.extend(batch)
+    
+                    bar.update(len(batch))
+    
+                    success = True
+    
+                    break
+    
+                except arxiv.HTTPError as exc:
+                    if exc.status == 429:
+                        backoff = min(
+                            600,
+                            30 * (2 ** attempt)
+                        )
+    
+                        jitter = random.randint(0, 15)
+    
+                        wait = backoff + jitter
+    
+                        logger.warning(
+                            f"arXiv API 429 on batch "
+                            f"{batch_idx} "
+                            f"(attempt {attempt + 1}/{max_batch_retries}), "
+                            f"retry in {wait}s"
+                        )
+    
+                        sleep(wait)
+    
+                    else:
+                        raise
+    
+            if not success:
+                logger.error(
+                    f"Skipping batch {batch_idx} after "
+                    f"{max_batch_retries} retries"
+                )
+    
+            # batch间限速
+            if start + batch_size < len(all_paper_ids):
+                sleep(15)
+    
+        bar.close()
+    
+        logger.info(
+            f"Successfully retrieved "
+            f"{len(raw_papers)} papers"
+        )
+    
+        return raw_papers
 
     def convert_to_paper(self, raw_paper: ArxivResult) -> Paper:
         title = raw_paper.title
